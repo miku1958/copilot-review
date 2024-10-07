@@ -1,4 +1,4 @@
-# Copilot.api
+# Copilot Review
 
 Provides a simple HTTP API to interface with GitHub Copilot, including native GitHub authentication.
 
@@ -7,25 +7,15 @@ Provides a simple HTTP API to interface with GitHub Copilot, including native Gi
 `pip install -r requirements.txt`
 
 ## Run
-`python3 api.py [port]`
 
-## Usage
-Send a POST request to `http://localhost:8080/api` with the following JSON body:
-
-### Request payload
-```json
-{
-    "prompt": "# hello world function\n\n",
-    "language": "python"
-}
+```sh
+cd <your repo>
+sh review.sh
 ```
 
-### Response
+### Output
 
-The response will be a plain text string containing the generated code.
-
-```text
-def hello_world():
+```diff
+@@ -81,19 +168,36 @@ void find_in_set(sqlite3_context *context, int argc, sqlite3_value **arguments)
++    int *list = (int *)sqlite3_value_blob(arguments[1]);  Potential null pointer dereference if sqlite3_value_blob(arguments[1]) returns NULL. 
 ```
-
-In order to build a complete code snippet, iteratively append the generated code to the prompt and send it back to the API until the response is empty.

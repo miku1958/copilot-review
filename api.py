@@ -1,23 +1,39 @@
-import http.server
-import threading
+import os
+import random
+import uuid
+import webbrowser
+import pyperclip
 import requests
 import json
 import time
 import sys
 
+# https://github.com/thonny/thonny/blob/master/thonny/plugins/github_copilot.py
+CLIENT_ID = "Iv1.b507a08c87ecfe98"
+
+BASE_HEADERS = {
+    "Accept": "application/json",
+    "Content-Type": "application/json",
+    "editor-version": "Neovim/0.9.2",
+    "editor-plugin-version": "copilot.lua/1.11.4",
+    "User-Agent": "GithubCopilot/1.133.0",
+}
+
+ACCESS_TOKEN_SECRET_KEY = os.path.expanduser('~') + "/.github_copilot_access_token"
+
 token = None
+session_id = str(uuid.uuid4()) + str(round(time.time() * 1000))
+machine_id = "".join([random.choice("0123456789abcdef") for _ in range(65)])
 
 def setup():
-    resp = requests.post('https://github.com/login/device/code', headers={
-            'accept': 'application/json',
-            'editor-version': 'Neovim/0.6.1',
-            'editor-plugin-version': 'copilot.vim/1.16.0',
-            'content-type': 'application/json',
-            'user-agent': 'GithubCopilot/1.155.0',
-            'accept-encoding': 'gzip,deflate,br'
-        }, data='{"client_id":"Iv1.b507a08c87ecfe98","scope":"read:user"}')
-
-
+    resp = requests.post(
+        'https://github.com/login/device/code', 
+        headers=BASE_HEADERS, 
+        json={
+            "client_id": CLIENT_ID, 
+            "scope": "read:user"
+        }
+    )
     # Parse the response json, isolating the device_code, user_code, and verification_uri
     resp_json = resp.json()
     device_code = resp_json.get('device_code')
@@ -25,19 +41,22 @@ def setup():
     verification_uri = resp_json.get('verification_uri')
 
     # Print the user code and verification uri
-    print(f'Please visit {verification_uri} and enter code {user_code} to authenticate.')
-
-
+    print(f'User code {user_code} has been copied to clipboard, please paste it into {verification_uri} to authenticate.')
+    
+    pyperclip.copy(user_code)
+    webbrowser.open(verification_uri)
+    
     while True:
         time.sleep(5)
-        resp = requests.post('https://github.com/login/oauth/access_token', headers={
-            'accept': 'application/json',
-            'editor-version': 'Neovim/0.6.1',
-            'editor-plugin-version': 'copilot.vim/1.16.0',
-            'content-type': 'application/json',
-            'user-agent': 'GithubCopilot/1.155.0',
-            'accept-encoding': 'gzip,deflate,br'
-            }, data=f'{{"client_id":"Iv1.b507a08c87ecfe98","device_code":"{device_code}","grant_type":"urn:ietf:params:oauth:grant-type:device_code"}}')
+        resp = requests.post(
+            'https://github.com/login/oauth/access_token', 
+            headers=BASE_HEADERS, 
+            json={
+                "client_id": CLIENT_ID,
+                "device_code": device_code,
+                "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+            }
+        )
 
         # Parse the response json, isolating the access_token
         resp_json = resp.json()
@@ -47,29 +66,28 @@ def setup():
             break
 
     # Save the access token to a file
-    with open('.copilot_token', 'w') as f:
+    with open(ACCESS_TOKEN_SECRET_KEY, 'w') as f:
         f.write(access_token)
 
     print('Authentication success!')
-
 
 def get_token():
     global token
         # Check if the .copilot_token file exists
     while True:
         try:
-            with open('.copilot_token', 'r') as f:
+            with open(ACCESS_TOKEN_SECRET_KEY, 'r') as f:
                 access_token = f.read()
                 break
         except FileNotFoundError:
             setup()
     # Get a session with the access token
-    resp = requests.get('https://api.github.com/copilot_internal/v2/token', headers={
-        'authorization': f'token {access_token}',
-        'editor-version': 'Neovim/0.6.1',
-        'editor-plugin-version': 'copilot.vim/1.16.0',
-        'user-agent': 'GithubCopilot/1.155.0'
-    })
+    resp = requests.get(
+        'https://api.github.com/copilot_internal/v2/token', 
+        headers=BASE_HEADERS | {
+            'authorization': f'token {access_token}',
+        }
+    )
 
     # Parse the response json, isolating the token
     resp_json = resp.json()
@@ -81,47 +99,90 @@ def token_thread():
     while True:
         get_token()
         time.sleep(25 * 60)
-    
-def copilot(prompt, language='python'):
+
+def get_api_headers():
+    return {
+        "authorization": f"Bearer {token}",
+        "x-request-id": str(uuid.uuid4()),
+        "vscode-sessionid": session_id,
+        "machineid": machine_id,
+        "editor-version": "vscode/1.85.1",
+        "editor-plugin-version": "copilot-chat/0.12.2023120701",
+        "openai-organization": "github-copilot",
+        "openai-intent": "conversation-panel",
+        "content-type": "application/json",
+        "user-agent": "GitHubCopilotChat/0.12.2023120701",
+    }
+def systemContent():
+    return "\n".join([
+        "You are a world-class Apple code reviewer.",
+        "Keep your answers short and impersonal.",
+        "Use Markdown formatting in your answers.",
+        "Make sure to include the programming language name at the start of the Markdown code blocks.",
+        "Avoid wrapping the whole response in triple backticks.",
+        "You can only give one reply for each conversation turn.",
+        "Minimize any other prose.",
+        "The user is fed the results of the git diff", 
+        "The user only asks you to identify the code that potentially causes the program to crash.",
+        "The user will make sure the files are compiled and verified",
+        "You don't care about compilation problems.",
+        "You don't care about format problems.",
+        "You don't care about syntax error.",
+        "The first line of the diff is its timestamps.",
+        "When outputting results, you should keep the original full diff content.",
+        "Then add a comment $comment directly at the end of the line that could cause a crash in the following format: <potential crash> $comment </potential crash>",
+        "Make sure you have replaced $comment with your comment.",
+        "Make sure you are commenting in the same line as the code that is likely to cause the crash.",
+    ])
+
+def copilot(prompt):
     global token
     # If the token is None, get a new one
     if token is None or is_token_invalid(token):
         get_token()
-
     try:
-        resp = requests.post('https://copilot-proxy.githubusercontent.com/v1/engines/copilot-codex/completions', headers={'authorization': f'Bearer {token}'}, json={
-            'prompt': prompt,
-            'suffix': '',
-            'max_tokens': 1000,
-            'temperature': 0,
-            'top_p': 1,
-            'n': 1,
-            'stop': ['\n'],
-            'nwo': 'github/copilot.vim',
-            'stream': True,
-            'extra': {
-                'language': language
+        resp = requests.post(
+            'https://api.githubcopilot.com/chat/completions', 
+            headers=get_api_headers(), 
+            json= {
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": systemContent()
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                "intent": True,
+                "n": 1,
+                "stream": False,
+                "temperature": 0.1,
+                "model": "gpt-4o", # gpt-4o, gpt-3.5-turbo https://github.com/zed-industries/zed/blob/main/crates/copilot/src/copilot_chat.rs
+                "top_p": 1,
+                "max_tokens": 128000,
             }
-        })
+        )
     except requests.exceptions.ConnectionError:
+        print("Connection error")
         return ''
-
-    result = ''
-
-    # Parse the response text, splitting it by newlines
-    resp_text = resp.text.split('\n')
-    for line in resp_text:
-        # If the line contains a completion, print it
-        if line.startswith('data: {'):
-            # Parse the completion from the line as json
-            json_completion = json.loads(line[6:])
-            completion = json_completion.get('choices')[0].get('text')
-            if completion:
-                result += completion
-            else:
-                result += '\n'
     
-    return result
+    messages_by_code = {
+        401: "Unauthorized. Make sure you have access to Copilot Chat.",
+        500: "Internal server error. Try again later.",
+        400: "Your prompt has been rejected by Copilot Chat.",
+        419: "You have been rate limited. Try again later.",
+    }
+    if resp.status_code != 200:
+        message = messages_by_code[resp.status_code]
+        if message != None:
+            print("resp", message)
+        else:
+            print("resp", resp)
+
+    json_completion = json.loads(resp.text)
+    return json_completion.get('choices')[0].get('message').get('content')
 
 # Check if the token is invalid through the exp field
 def is_token_invalid(token):
@@ -137,41 +198,34 @@ def extract_exp_value(token):
             return int(value.strip())
     return None
 
-class HTTPRequestHandler(http.server.BaseHTTPRequestHandler):
-    def do_POST(self):
-        # Get the request body
-        content_length = int(self.headers['Content-Length'])
-        body = self.rfile.read(content_length)
+def printWithColor(text):
+    # ANSI escape codes for colors
+    RED = '\033[91m'
+    RESET = '\033[0m'
 
-        # Parse the request body as json
-        body_json = json.loads(body)
+    # Replace <potential crash> </potential crash> with red color
+    start_tag = '<potential crash>'
+    end_tag = '</potential crash>'
+    
+    while start_tag in text and end_tag in text:
+        start_index = text.index(start_tag)
+        end_index = text.index(end_tag) + len(end_tag)
+        colored_text = RED + text[start_index + len(start_tag):text.index(end_tag)] + RESET
+        text = text[:start_index] + colored_text + text[end_index:]
 
-        # Get the prompt from the request body
-        prompt = body_json.get('prompt')
-        language = body_json.get('language', 'python')
-
-        # Get the completion from the copilot function
-        completion = copilot(prompt, language)
-
-        # Send the completion as the response
-        self.send_response(200)
-        self.send_header('Content-type', 'text/plain')
-        self.end_headers()
-        self.wfile.write(completion.encode())
-
+    print(text)
 
 def main():
-    # Every 25 minutes, get a new token
-    threading.Thread(target=token_thread).start()
     # Get the port to listen on from the command line
     if len(sys.argv) < 2:
-        port = 8080
+        print('Usage: python api.py diff')
+        exit(1)
     else:
-        port = int(sys.argv[1])
-    # Start the http server
-    httpd = http.server.HTTPServer(('0.0.0.0', port), HTTPRequestHandler)
-    print(f'Listening on port 0.0.0.0:{port}...')
-    httpd.serve_forever()
+        prompt = sys.argv[1]
+
+    # Get the completion from the copilot function
+    completion = copilot(prompt)
+    printWithColor(completion)
 
 if __name__ == '__main__':
     main()
