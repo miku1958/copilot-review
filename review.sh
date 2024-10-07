@@ -37,11 +37,10 @@ for file in $staged_files; do
             filteredArray+=("$element")
         fi
     done
+    echo "-----------------------------------------------"
+    echo "$file"
+    echo "-----------------------------------------------"
     for element in "${filteredArray[@]}"; do
         python3 $SCRIPT_DIR/api.py "$element"
-
-        echo "-----------------------------------------------"
-        echo "-----------------------------------------------"
-        echo "-----------------------------------------------"
     done
 done
