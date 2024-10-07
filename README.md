@@ -10,12 +10,9 @@ Provides a simple HTTP API to interface with GitHub Copilot, including native Gi
 
 ```sh
 cd <your repo>
-sh review.sh
+sh <local repo path>/review.sh
 ```
 
 ### Output
 
-```diff
-@@ -81,19 +168,36 @@ void find_in_set(sqlite3_context *context, int argc, sqlite3_value **arguments)
-+    int *list = (int *)sqlite3_value_blob(arguments[1]);  Potential null pointer dereference if sqlite3_value_blob(arguments[1]) returns NULL. 
-```
+<img width="1042" alt="image" src="https://github.com/user-attachments/assets/cd109949-fc66-442e-b34d-17f2a278ded2">
